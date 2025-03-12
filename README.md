@@ -155,7 +155,7 @@ terraform -chdir=eks_terraform apply -auto-approve
 - When this completes, you will have an EKS Kubernetes control plane managed by AWS. This costs ~0.1 USD/hour.
 
 ### Run the code
-Follow the instructions in the "Running in EKS" section of the hello_world/orchestrate.ipynb notebook.
+Follow the instructions in the "Running in EKS" section of the `orchestration/hello_world/orchestrate.ipynb` notebook.
 
 ### Helpful Commands to Know
 
