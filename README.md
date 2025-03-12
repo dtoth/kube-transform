@@ -24,7 +24,7 @@ To implement a transformation in Kube Transform, you simply need to write:
 
 ## Getting Started: Running Hello World Locally
 
-Follow these steps to set up your environment and run a small version of the Spotify Million Playlist Challenge example locally.
+Follow these steps to set up your environment and run a small Hello World example locally.
 
 These steps are intended to be run on Mac OSX, so you will need to adapt them to support other OSes (e.g. modify brew commands for installing dependencies).
 
