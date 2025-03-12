@@ -8,7 +8,7 @@ Secondarily, as an example use-case, I've included my solution to the [Spotify M
 
 ## Target Audience and Workflow Overview
 
-Let's say you have 1 or more data files, and you want to process them into another form (anything from lightweight reformatting to computationally-intensive operations.) But let's say doing so on a single instance would be slow or infeasible due to resource limitations. This repo provides a simple framework to help you accopmlish this by writing a series of horizontally scalable transformations.
+Let's say you have 1 or more data files, and you want to process them into another form (anything from lightweight reformatting to computationally-intensive operations.) But let's say doing so on a single instance would be slow or infeasible due to resource limitations. This repo provides a simple framework to help you accomplish this by writing a series of horizontally scalable transformations.
 
 A single transformation operates on some set of 0+ input files, and creates some set of 1+ output files.
 
@@ -31,7 +31,7 @@ These steps are intended to be run on Mac OSX, so you will need to adapt them to
 ### Clone this repo and CD into it
 ```
 cd ~
-git@github.com:dtoth/kube-transform.git
+git clone git@github.com:dtoth/kube-transform.git
 cd kube-transform
 ```
 
