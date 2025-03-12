@@ -1,0 +1,22 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "KubeTransformTask",
+    "type": "object",
+    "properties": {
+        "function": {
+            "type": "string",
+            "description": "A function name to run (must be in pod_execution.py)."
+        },
+        "args": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "string"
+            },
+            "description": "Arguments to pass into the target function."
+        }
+    },
+    "required": [
+        "function",
+        "args"
+    ]
+}
