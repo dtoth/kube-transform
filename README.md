@@ -15,9 +15,9 @@ A single transformation operates on some set of 0+ input files, and creates some
 A transformation is executed by running 1+ tasks in parallel, where each task handles some subset of the problem.
 
 To implement a transformation in Kube Transform, you simply need to write:
-- **An orchestration function** which defines how the transformation should be broken into tasks. For example, the orchestration function might take in a directory, list the files, and assign one task per file. This is a lightweight function that runs on the orchestration device (e.g. your local computer). It should output a dictionary that adheres to the [KubeTransformJob JSON schema](schemas/kube_transform_job.json).
-- **An execution function** which carries out the actual work associated with one task. For example, this function might take in an input path, read the contents, process it, and save the results. This can be a compute-intensive function, and it runs on the Kubernetes cluster. The execution function should be thin and easy to read, as any complex logic should be encapsulated in logic modules.
-- **Logic modules** as needed to handle the data transformation logic.
+- **An orchestration function** which defines how the transformation should be broken into tasks. For [example](https://github.com/dtoth/kube-transform/blob/14a1f31bb9287c334b731898e410818f00f99a7f/orchestration/hello_world/orchestrate.py#L28-L46), the orchestration function might take in a directory, list the files, and assign one task per file. This is a lightweight function that runs on the orchestration device (e.g. your local computer). It should output a dictionary that adheres to the [KubeTransformJob JSON schema](schemas/kube_transform_job.json).
+- **An execution function** which carries out the actual work associated with one task. For [example](https://github.com/dtoth/kube-transform/blob/14a1f31bb9287c334b731898e410818f00f99a7f/execution/hello_world/pod_execution.py#L5-L10), this function might take in an input path, read the contents, process it, and save the results. This can be a compute-intensive function, and it runs on the Kubernetes cluster. The execution function should be thin and easy to read, as any complex logic should be encapsulated in logic modules.
+- **Logic modules** as needed to handle the data transformation logic ([example](execution/hello_world/logic/hello_world_logic_module.py)).
 
 
 
