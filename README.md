@@ -1,6 +1,6 @@
 # kube-transform
 
-**kube-transform** is a lightweight open-source framework for writing and deploying distributed data transformations on Kubernetes.
+**kube-transform** is a lightweight open-source framework for writing and deploying distributed batch-oriented data transformations on Kubernetes.
 
 It aims to enable seamless execution of Dockerized python code on both Minikube (for local development) and Amazon Elastic Kubernetes Service (highly scalable) with minimal setup.
 
@@ -8,17 +8,21 @@ Secondarily, as an example use-case, I've included my solution to the [Spotify M
 
 ## Target Audience and Workflow Overview
 
-Let's say you have 1 or more data files, and you want to process them into another form (anything from lightweight reformatting to computationally-intensive operations.) But let's say doing so on a single instance would be slow or infeasible due to resource limitations. This repo provides a simple framework to help you accomplish this by writing a series of horizontally scalable transformations.
+You can think of **kube-transform** as essentially a *very* simple alternative to Apache Airflow. Unlike Airflow, kube-transform doesn't have its own control plane - it talks directly to the Kubernetes control plane.
 
-A single transformation operates on some set of 0+ input files, and creates some set of 1+ output files.
+With **kube-transform**, you can say:
+- Here's an arbitrary python function.
+- Here are N (e.g. 100) sets of arguments.
+- I want to invoke the function N times in parallel (once with each argument set), and I want each invocation to get at least X GB of RAM and Y CPU cores.
 
-A transformation is executed by running 1+ tasks in parallel, where each task handles some subset of the problem.
+**kube-transform** creates the corresponding Kubernetes Job manifest and submits it to your cluster. If running locally, parallelization will be limited by your local resources. If running in EKS, you can achieve massive parallelization.
 
 To implement a transformation in Kube Transform, you simply need to write:
-- **An orchestration function** which defines how the transformation should be broken into tasks. For [example](https://github.com/dtoth/kube-transform/blob/14a1f31bb9287c334b731898e410818f00f99a7f/orchestration/hello_world/orchestrate.py#L28-L46), the orchestration function might take in a directory, list the files, and assign one task per file. This is a lightweight function that runs on the orchestration device (e.g. your local computer). It should output a dictionary that adheres to the [KubeTransformJob JSON schema](schemas/kube_transform_job.json).
+- **An orchestration function** which defines how the transformation should be broken into tasks. For [example](https://github.com/dtoth/kube-transform/blob/14a1f31bb9287c334b731898e410818f00f99a7f/orchestration/hello_world/orchestrate.py#L28-L46), the orchestration function might take in a directory, list the files, and create one task per file. This is a lightweight function that runs on the orchestration device (e.g. your local computer). It should output a dictionary that adheres to the [KubeTransformJob JSON schema](schemas/kube_transform_job.json).
 - **An execution function** which carries out the actual work associated with one task. For [example](https://github.com/dtoth/kube-transform/blob/14a1f31bb9287c334b731898e410818f00f99a7f/execution/hello_world/pod_execution.py#L5-L10), this function might take in an input path, read the contents, process it, and save the results. This can be a compute-intensive function, and it runs on the Kubernetes cluster. The execution function should be thin and easy to read, as any complex logic should be encapsulated in logic modules.
 - **Logic modules** as needed to handle the data transformation logic ([example](execution/hello_world/logic/hello_world_logic_module.py)).
 
+Note that Airflow has excellent support for defining complex dependencies between tasks via DAGs. kube-transform does not yet support this: you need to execute transformations (i.e. batches of tasks) serially, with massive parallelization available within those transformations.
 
 
 
