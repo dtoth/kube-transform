@@ -166,7 +166,7 @@ kubectl delete jobs --all
 
 #### Destroy your EKS cluster
 ```
-terraform destroy --auto-approve
+terraform -chdir=eks_terraform destroy --auto-approve
 ```
 - This will take several minutes to complete. It will destroy the VPCs, subnets, and EKS cluster created by terraform.
 - If successful, this will stop all costs from EKS. You may still be charged a small amount for S3 and ECR storage, since it won't delete S3 buckets or ECR repos unless they are empty.
