@@ -1,4 +1,16 @@
-# kube-transform
+> ## 🚧 Major Refactor in Progress – Expect Changes 🚧
+>
+> This repository is undergoing a major refactor to streamline kube-transform (KT) into a minimalistic, reusable package that provides a lightweight alternative to Airflow while maintaining Kubernetes-native orchestration.
+>
+> The main branch reflects the last working version, but it is not fully tested or polished.
+>
+> Active development is happening on the *refactor-kt-package* branch.
+>
+> The goal of this refactor is to make KT extremely easy to use, enabling simple job orchestration with minimal dependencies.
+>
+> If you’re interested in a stable release, check back later once the refactor is complete!
+
+# kube-transform 
 
 **kube-transform** is a lightweight open-source framework for writing and deploying distributed batch-oriented data transformations on Kubernetes.
 
@@ -15,7 +27,7 @@ With **kube-transform**, you can say:
 - Here are N (e.g. 100) sets of arguments.
 - I want to invoke the function N times in parallel (once with each argument set), and I want each invocation to get at least X GB of RAM and Y CPU cores.
 
-**kube-transform** creates the corresponding Kubernetes Job manifest and submits it to your cluster. If running locally, parallelization will be limited by your local resources. If running in EKS, you can achieve massive parallelization.
+**kube-transform** creates the corresponding Kubernetes Job manifest and submits it to your cluster. If running locally, parallelization will be limited by your local resources. If running in EKS (or any large or autoscaling cluster), you can achieve massive parallelization.
 
 To implement a transformation in Kube Transform, you simply need to write:
 - **An orchestration function** which defines how the transformation should be broken into tasks. For [example](https://github.com/dtoth/kube-transform/blob/14a1f31bb9287c334b731898e410818f00f99a7f/orchestration/hello_world/orchestrate.py#L28-L46), the orchestration function might take in a directory, list the files, and create one task per file. This is a lightweight function that runs on the orchestration device (e.g. your local computer). It should output a dictionary that adheres to the [KubeTransformJob JSON schema](schemas/kube_transform_job.json).
