@@ -6,17 +6,19 @@ import logging
 import kube_transform.fsutil as fs
 
 
-def create_controller_job(dag_uuid, dag_spec, image_path, data_dir, namespace):
+def create_controller_job(
+    pipeline_run_id, pipeline_spec, image_path, data_dir, namespace
+):
     """Creates a Kubernetes Job to run the KTController.
     This code is run on the deployment device.
     """
     job_name = f"kt-controller"
 
-    # Create a ConfigMap with the DAG spec
-    config_map_name = f"dag-config-{dag_uuid}"
+    # Create a ConfigMap with the pipeline spec
+    config_map_name = f"pipeline-config-{pipeline_run_id}"
     config_map = client.V1ConfigMap(
         metadata=client.V1ObjectMeta(name=config_map_name),
-        data={"dag_spec.json": json.dumps(dag_spec)},
+        data={"pipeline_spec.json": json.dumps(pipeline_spec)},
     )
     core_v1 = client.CoreV1Api()
     core_v1.create_namespaced_config_map(namespace=namespace, body=config_map)
@@ -27,7 +29,7 @@ def create_controller_job(dag_uuid, dag_spec, image_path, data_dir, namespace):
         namespace,
         config_map_name,
         data_dir,
-        dag_uuid,
+        pipeline_run_id,
         job_args={},
         service_account="kt-controller",
         command=["python", "-m", "kube_transform.controller.controller"],
@@ -36,18 +38,20 @@ def create_controller_job(dag_uuid, dag_spec, image_path, data_dir, namespace):
     )
 
 
-def create_static_job(job_name, dag_uuid, job_spec, image_path, namespace):
+def create_static_job(job_name, pipeline_run_id, job_spec, image_path, namespace):
     """Creates a Kubernetes Job to run a static job."
     This code is run on the controller pod."
     """
 
     # Write job config for task index lookup
-    task_config_path = f"kt-metadata/{dag_uuid}/static_job_config_maps/{job_name}.json"
+    task_config_path = (
+        f"kt-metadata/{pipeline_run_id}/static_job_config_maps/{job_name}.json"
+    )
     logging.info(f"Writing task config to {task_config_path}")
     fs.write(task_config_path, json.dumps({"tasks": job_spec["tasks"]}, indent=2))
 
-    memory = job_spec.get("resources", {}).get("memory", "1Gi")
-    cpu = job_spec.get("resources", {}).get("cpu", "500m")
+    memory = job_spec.get("memory", "1Gi")
+    cpu = job_spec.get("cpu", "500m")
 
     create_k8s_job(
         job_name=job_name,
@@ -55,7 +59,7 @@ def create_static_job(job_name, dag_uuid, job_spec, image_path, namespace):
         namespace=namespace,
         config_map_name=None,  # only used for controller job
         data_dir=os.environ["DATA_DIR"],
-        dag_uuid=dag_uuid,
+        pipeline_run_id=pipeline_run_id,
         job_args={"task_config_path": task_config_path},
         service_account="default",
         command=[
@@ -85,13 +89,13 @@ def create_static_job(job_name, dag_uuid, job_spec, image_path, namespace):
     )
 
 
-def create_dynamic_job(job_name, dag_uuid, job_spec, image_path, namespace):
+def create_dynamic_job(job_name, pipeline_run_id, job_spec, image_path, namespace):
     """Creates a Kubernetes Job to run a dynamic job."
     This code is run on the controller pod."
     """
 
-    memory = job_spec.get("resources", {}).get("memory", "1Gi")
-    cpu = job_spec.get("resources", {}).get("cpu", "500m")
+    memory = job_spec.get("memory", "1Gi")
+    cpu = job_spec.get("cpu", "500m")
 
     create_k8s_job(
         job_name=job_name,
@@ -99,7 +103,7 @@ def create_dynamic_job(job_name, dag_uuid, job_spec, image_path, namespace):
         namespace=namespace,
         config_map_name=None,  # only used for controller job
         data_dir=os.environ["DATA_DIR"],
-        dag_uuid=dag_uuid,
+        pipeline_run_id=pipeline_run_id,
         job_args={"function": job_spec["function"], "args": job_spec["args"]},
         service_account="default",
         command=[
@@ -118,10 +122,10 @@ def create_dynamic_job(job_name, dag_uuid, job_spec, image_path, namespace):
                 "module_path, func_name = target_func.rsplit('.', 1)\n"
                 "func = getattr(importlib.import_module('kt_functions.' + module_path), func_name)\n"
                 "logging.info('Generating job spec')\n"
-                "js = func(**target_args)\n"
+                "jobs = func(**target_args)\n"
                 "logging.info('Saving job spec')\n"
                 "orch_spec_path = os.environ.get('KT_ORCH_SPEC_PATH')\n"
-                "fs.write(orch_spec_path, json.dumps(js))\n"
+                "fs.write(orch_spec_path, json.dumps(jobs))\n"
                 "logging.info('Success')\n"
             ),
         ],
@@ -136,7 +140,7 @@ def create_k8s_job(
     namespace,
     config_map_name,
     data_dir,
-    dag_uuid,
+    pipeline_run_id,
     job_args,
     service_account,
     command,
@@ -156,7 +160,7 @@ def create_k8s_job(
         ),
     ]
     volume_mounts = [
-        client.V1VolumeMount(name="data-volume", mount_path="/app/data"),
+        client.V1VolumeMount(name="data-volume", mount_path="/mnt/data"),
     ]
 
     if config_map_name:
@@ -170,8 +174,8 @@ def create_k8s_job(
             client.V1VolumeMount(name="config-volume", mount_path="/config")
         )
 
-    orch_spec_path = f"kt-metadata/{dag_uuid}/dynamic_job_output/{job_name}.json"
-    fully_qualified_job_name = f"{job_name}-{dag_uuid}"
+    orch_spec_path = f"kt-metadata/{pipeline_run_id}/dynamic_job_output/{job_name}.json"
+    fully_qualified_job_name = f"{job_name}-{pipeline_run_id}"
 
     container = client.V1Container(
         name=fully_qualified_job_name,
@@ -179,7 +183,7 @@ def create_k8s_job(
         image_pull_policy=image_pull_policy,
         env=[
             client.V1EnvVar(name="DATA_DIR", value=data_dir),
-            client.V1EnvVar(name="DAG_UUID", value=dag_uuid),
+            client.V1EnvVar(name="pipeline_run_id", value=pipeline_run_id),
             client.V1EnvVar(name="KT_JOB_ARGS", value=json.dumps(job_args)),
             client.V1EnvVar(name="KT_IMAGE_PATH", value=image_path),
             client.V1EnvVar(

@@ -2,10 +2,12 @@ import json
 import time
 import os
 import uuid
+import re
 from kubernetes import client, watch
 import kube_transform.fsutil as fs
 import logging
 from kube_transform.controller.k8s import create_static_job, create_dynamic_job
+from kube_transform.spec import KTPipeline, KTJob
 
 JOB_STATES = [
     "Running",
@@ -21,48 +23,59 @@ JOB_STATES = [
 class KTController:
 
     ### Initialization ###
-    def __init__(self, dag_uuid, namespace="default", dry_run=False):
+    def __init__(self, pipeline_run_id, namespace="default", dry_run=False):
         self.namespace = namespace
-        self.dag_uuid = dag_uuid
-        self.dag_spec_path = "/config/dag_spec.json"
-        self.dag_state_path = f"kt-metadata/{dag_uuid}/dag_run_state.json"
+        self.pipeline_run_id = pipeline_run_id
+        self.pipeline_spec_path = "/config/pipeline_spec.json"
+        self.pipeline_state_path = (
+            f"kt-metadata/{pipeline_run_id}/pipeline_run_state.json"
+        )
         self.dry_run = dry_run
         self.batch_v1 = client.BatchV1Api()
-        self.dag = self.load_dag_spec()
-        self.state = self.initialize_dag_state()
+        self.pipeline = self.validate_pipeline(self.load_pipeline_spec())
+        self.state = self.initialize_pipeline_state()
         self.image = os.getenv("KT_IMAGE_PATH")
 
-    def load_dag_spec(self):
-        with open(self.dag_spec_path, "r") as f:
+    def load_pipeline_spec(self):
+        with open(self.pipeline_spec_path, "r") as f:
             return json.load(f)
 
-    def initialize_dag_state(self):
-        state = {"dag_uuid": self.dag_uuid, "jobs": {}}
-        for job in self.dag["jobs"]:
+    def initialize_pipeline_state(self):
+        state = {"pipeline_run_id": self.pipeline_run_id, "jobs": {}}
+        for job in self.pipeline["jobs"]:
             job_name = job["name"]
-            job_type = job.get("type")
-            if job_type not in ["dynamic", "static"]:
-                raise ValueError(
-                    f"Job '{job_name}' must specify type as either 'dynamic' or 'static'."
-                )
-            # TODO more validation here
-            state["jobs"][job_name] = {
-                "job_name": job_name,
-                "status": "Pending",
-                "dependencies": job.get("dependencies", []),
-                "tasks": job.get("tasks"),
-                "function": job.get("function"),
-                "args": job.get("args"),
-                "type": job_type,
-            }
-            if "resources" in job:
-                state["jobs"][job_name]["resources"] = job["resources"]
-        self.save_dag_state(state)
+            state["jobs"][job_name] = job
+            job["status"] = "Pending"
+        self.save_pipeline_state(state)
         return state
 
+    def sanitize_k8s_job_name(self, s: str) -> str:
+        s = s.lower()
+        s = s.replace("_", "-")
+        s = re.sub(r"[^a-z0-9\-]", "", s)
+        return s[:63]
+
+    def validate_job_list(self, job_list, base_name):
+        jobs = []
+        for idx, job in enumerate(job_list):
+            job_obj = KTJob(**job)
+            job = job_obj.model_dump()
+            if not job.get("name"):
+                job["name"] = f"{base_name}-job-{idx}"
+            job["name"] = self.sanitize_k8s_job_name(job["name"])
+            jobs.append(job)
+        return jobs
+
+    def validate_pipeline(self, pipeline):
+        pipeline_obj = KTPipeline(**pipeline)
+        pipeline = pipeline_obj.model_dump()
+        jobs = self.validate_job_list(pipeline["jobs"], f"pipeline-{pipeline["name"]}")
+        pipeline["jobs"] = jobs
+        return pipeline
+
     ### State Management ###
-    def save_dag_state(self, state):
-        fs.write(self.dag_state_path, json.dumps(state, indent=2))
+    def save_pipeline_state(self, state):
+        fs.write(self.pipeline_state_path, json.dumps(state, indent=2))
 
     ### Job Management ###
     def submit_ready_jobs(self):
@@ -80,27 +93,34 @@ class KTController:
         job_spec = self.state["jobs"][job_name]
 
         if not job_spec:
-            raise ValueError(f"Job {job_name} not found in DAG spec!")
+            raise ValueError(f"Job {job_name} not found in pipeline spec!")
 
-        if job_spec["type"] == "static":
-            create_static_job(
-                job_name,
-                self.dag_uuid,
-                job_spec,
-                self.image,
-                self.namespace,
-            )
-        elif job_spec["type"] == "dynamic":
-            create_dynamic_job(
-                job_name,
-                self.dag_uuid,
-                job_spec,
-                self.image,
-                self.namespace,
-            )
+        if not job_spec["tasks"] and not job_spec["function"]:
+            logging.info(f"Job {job_name} is a no-op.")
+            job_spec["status"] = "Completed"
+            self.handle_job_completion(job_name, True)
 
-        job_spec["status"] = "Running"
-        self.save_dag_state(self.state)
+        else:
+            if job_spec["type"] == "static":
+                create_static_job(
+                    job_name,
+                    self.pipeline_run_id,
+                    job_spec,
+                    self.image,
+                    self.namespace,
+                )
+            elif job_spec["type"] == "dynamic":
+                create_dynamic_job(
+                    job_name,
+                    self.pipeline_run_id,
+                    job_spec,
+                    self.image,
+                    self.namespace,
+                )
+
+            job_spec["status"] = "Running"
+
+        self.save_pipeline_state(self.state)
 
     def update_job_states(self):
         """Update job states based on dependencies and descendants."""
@@ -155,42 +175,35 @@ class KTController:
             elif job_info["type"] == "dynamic":
                 # Spawn descendant jobs
                 job_info["status"] = "AwaitingDescendants"
-                orch_spec_path = (
-                    f"kt-metadata/{self.dag_uuid}/dynamic_job_output/{job_name}.json"
-                )
+                orch_spec_path = f"kt-metadata/{self.pipeline_run_id}/dynamic_job_output/{job_name}.json"
                 if fs.exists(orch_spec_path):
                     orch_spec = json.loads(fs.read(orch_spec_path))
-                    self.dag["jobs"].extend(orch_spec["jobs"])
+                    new_job_list = self.validate_job_list(orch_spec, job_name)
                     direct_descendants = []
-                    for jidx, new_job in enumerate(orch_spec["jobs"]):
-                        new_job_name = new_job.get("name", f"{job_name}-spawned-{jidx}")
-                        new_job_type = new_job.get("type")
-                        # TODO more validation (and consolidate validation)
-                        if new_job_type not in ["dynamic", "static"]:
-                            raise ValueError(
-                                f"Job '{new_job_name}' must specify type as either 'dynamic' or 'static'."
-                            )
-
+                    for jidx, new_job in enumerate(new_job_list):
+                        new_job_name = new_job["name"]
                         self.state["jobs"][new_job_name] = new_job
                         new_job["status"] = "Pending"
                         new_job["parent_job"] = job_name
-                        new_job["dependencies"] = new_job.get("dependencies", [])
-                        new_job["tasks"] = new_job.get("tasks", [])
                         direct_descendants.append(new_job_name)
                     job_info["direct_descendants"] = direct_descendants
+                else:
+                    logging.warning(
+                        f"Orchestration spec not found at {orch_spec_path}. No jobs spawned."
+                    )
 
         # Update state for all jobs, submit ready jobs, and save state
         self.update_job_states()
         self.submit_ready_jobs()
-        self.save_dag_state(self.state)
+        self.save_pipeline_state(self.state)
 
         if job_info["type"] == "dynamic":
             orch_spec_path = (
-                f"kt-metadata/{self.dag_uuid}/orchestration/{job_name}.json"
+                f"kt-metadata/{self.pipeline_run_id}/orchestration/{job_name}.json"
             )
             if fs.exists(orch_spec_path):
                 orch_spec = json.loads(fs.read(orch_spec_path))
-                self.dag["jobs"].extend(orch_spec["jobs"])
+                self.pipeline["jobs"].extend(orch_spec["jobs"])
                 spawned_jobs = []
 
                 for new_job in orch_spec["jobs"]:
@@ -213,7 +226,7 @@ class KTController:
                     "status"
                 ] = "Awaiting-Descendant-Completion"
                 self.state["jobs"][job_name]["spawned_jobs"] = spawned_jobs
-                self.save_dag_state(self.state)
+                self.save_pipeline_state(self.state)
 
         self.submit_ready_jobs()
 
@@ -231,10 +244,10 @@ class KTController:
                 job = event["object"]
                 job_name = job.metadata.name
 
-                if self.dag_uuid not in job_name:
+                if self.pipeline_run_id not in job_name:
                     continue
 
-                job_name = job_name.replace(f"-{self.dag_uuid}", "")
+                job_name = job_name.replace(f"-{self.pipeline_run_id}", "")
                 job_status = job.status.conditions
 
                 if job_name not in self.state["jobs"] or self.state["jobs"][job_name][
@@ -275,6 +288,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logging.info("Starting KT Controller...")
     config.load_incluster_config()
-    dag_uuid = os.getenv("DAG_UUID", str(uuid.uuid4()))
-    dag_controller = KTController(dag_uuid, namespace="default")
-    dag_controller.monitor_jobs()
+    pipeline_run_id = os.getenv("pipeline_run_id", str(uuid.uuid4()))
+    pipeline_controller = KTController(pipeline_run_id, namespace="default")
+    pipeline_controller.monitor_jobs()
