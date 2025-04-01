@@ -68,7 +68,7 @@ class KTController:
     def validate_pipeline(self, pipeline):
         pipeline_obj = KTPipeline(**pipeline)
         pipeline = pipeline_obj.model_dump()
-        jobs = self.validate_job_list(pipeline["jobs"], f"pipeline-{pipeline["name"]}")
+        jobs = self.validate_job_list(pipeline["jobs"], f"pipeline-{pipeline['name']}")
         pipeline["jobs"] = jobs
         return pipeline
 
@@ -77,13 +77,16 @@ class KTController:
         fs.write(self.pipeline_state_path, json.dumps(state, indent=2))
 
     ### Job Management ###
+    def job_can_run(self, job):
+        return job["status"] == "Pending" and all(
+            self.state["jobs"][dep]["status"] == "Completed"
+            for dep in job["dependencies"]
+        )
+
     def submit_ready_jobs(self):
         """Submit all jobs that are ready to run."""
         for job_name, job in self.state["jobs"].items():
-            if job["status"] == "Pending" and all(
-                self.state["jobs"][dep]["status"] == "Completed"
-                for dep in job["dependencies"]
-            ):
+            if self.job_can_run(job):
                 self.submit_job(job_name)
 
     def submit_job(self, job_name):
