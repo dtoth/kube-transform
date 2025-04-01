@@ -1,9 +1,3 @@
-## Notice
-
-This project is currently on version 0.1.0-rc. Prior to version 1.0.0, documentation may be limited.
-
----
-
 ## kube-transform
 
 **kube-transform** is a lightweight open-source framework for writing and deploying distributed, batch-oriented data pipelines on Kubernetes.
