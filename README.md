@@ -48,7 +48,7 @@ To run a pipeline, you must provide:
 > The KT controller internally uses `fsspec.open()` to write pipeline metadata to `DATA_DIR`. You must ensure that `DATA_DIR` is transparently accessible to all pods (including the controller). This typically means one of the following:
 >
 > - You're using a mounted volume that is accessible at `/mnt/data`
-> - You've configured access via IRSA (on AWS) or Workload Identity (on GCP), so the `kt-pod` service account has permissions to access your object store
+> - You've configured access via IRSA (for S3) or Workload Identity (for GCS), so the `kt-pod` service account has permissions to access your object store
 
 > In a single-node cluster, simply mounting a local folder to `/mnt/data` will work. All KT pods will have access to `/mnt/data`.
 
