@@ -31,7 +31,7 @@ def create_controller_job(
         data_dir,
         pipeline_run_id,
         job_args={},
-        service_account="kt-controller",
+        service_account="kt-pod",
         command=["python", "-m", "kube_transform.controller.controller"],
         memory="1Gi",
         cpu="250m",
@@ -61,7 +61,7 @@ def create_static_job(job_name, pipeline_run_id, job_spec, image_path, namespace
         data_dir=os.environ["DATA_DIR"],
         pipeline_run_id=pipeline_run_id,
         job_args={"task_config_path": task_config_path},
-        service_account="default",
+        service_account="kt-pod",
         command=[
             "python",
             "-c",
@@ -105,7 +105,7 @@ def create_dynamic_job(job_name, pipeline_run_id, job_spec, image_path, namespac
         data_dir=os.environ["DATA_DIR"],
         pipeline_run_id=pipeline_run_id,
         job_args={"function": job_spec["function"], "args": job_spec["args"]},
-        service_account="default",
+        service_account="kt-pod",
         command=[
             "python",
             "-c",

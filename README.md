@@ -8,7 +8,7 @@ kube-transform is a lightweight open-source framework for writing and deploying 
 kube-transform requires very little configuration. It's recommended that you check out kube-transform-starter-kit for examples (and reusable code) to help create and configure a Kubernetes cluster to use with kube-transform. But that is entirely optional, as this package will work with any image, file store, and Kuberenetes cluster that meet the following criteria:
 
 1. Docker Image
-    - Has Python 3.7+ installed
+    - Has Python 3.12+ installed
     - Has kube-transform installed (e.g. via pip)
     - Has your code (anything referenced in your DAGs) in /app/kt_functions/, which should be an importable module.
 
@@ -19,7 +19,7 @@ kube-transform requires very little configuration. It's recommended that you che
 3. Kubernetes Cluster
     - Can access your docker image (e.g. ECR access)
     - Can access your file store (e.g. S3 access)
-    - Has a service account called "kt-controller" which is allowed to create Jobs in the default namespace. This will be used by the kt-controller pods. For instructions on how to configure this, see `kube-transform-starter-kit`. Or simply apply the RBAC file provided there.
+    - Has a service account called "kt-pod" which is allowed to create Jobs in the default namespace. This will be used by all kube-transform pods. For instructions on how to configure this, see `kube-transform-starter-kit`. Or simply apply the RBAC file provided there.
     - Ensure your deployment machine can access your k8s cluster (i.e. you can run kubectl)
 
 4. Deployment Setup
