@@ -28,7 +28,7 @@ To run a pipeline, you must provide:
 
 ### 2. Docker Image
 
-- Must include Python 3.12+
+- Must include Python 3.11+
 - Must have `kube-transform` installed (e.g. via pip)
 - Must include your code in `/app/kt_functions/`, which should be an importable module containing the functions referenced in your pipeline
 
