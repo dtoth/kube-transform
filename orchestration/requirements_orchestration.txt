@@ -1,7 +1,0 @@
-jupyter
-kubernetes
-boto3
-pandas
-lz4
-pyarrow
-pytest
