@@ -1,3 +1,5 @@
+[![PyPI version](https://img.shields.io/pypi/v/kube-transform.svg)](https://pypi.org/project/kube-transform/)
+
 ## kube-transform
 
 **kube-transform** is a lightweight open-source framework for writing and deploying distributed, batch-oriented data pipelines on Kubernetes.
