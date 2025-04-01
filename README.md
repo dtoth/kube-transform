@@ -79,6 +79,8 @@ You can view progress using:
 kubectl get pods
 ```
 
+Make sure you have the same version of kube-transform running locally (for the `run_pipeline` function) as you have in your image.
+
 ---
 
 ## Autoscaling & Resource Management
