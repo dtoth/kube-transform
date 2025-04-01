@@ -23,14 +23,13 @@ JOB_STATES = [
 class KTController:
 
     ### Initialization ###
-    def __init__(self, pipeline_run_id, namespace="default", dry_run=False):
+    def __init__(self, pipeline_run_id, namespace="default"):
         self.namespace = namespace
         self.pipeline_run_id = pipeline_run_id
         self.pipeline_spec_path = "/config/pipeline_spec.json"
         self.pipeline_state_path = (
             f"kt-metadata/{pipeline_run_id}/pipeline_run_state.json"
         )
-        self.dry_run = dry_run
         self.batch_v1 = client.BatchV1Api()
         self.pipeline = self.validate_pipeline(self.load_pipeline_spec())
         self.state = self.initialize_pipeline_state()
