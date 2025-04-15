@@ -172,16 +172,15 @@ class PipelineManager:
                 self.mark_job_failed(parent_job_name, failure_type="DescendantFailed")
 
         # Update dependents
-        if failure_type in ["Failed", "SkippedDueToUpstreamFailure"]:
-            direct_dependents = [
-                other_job_name
-                for other_job_name, other_job in self.state["jobs"].items()
-                if job_name in other_job.get("dependencies", [])
-            ]
-            for dependent_job_name in direct_dependents:
-                self.mark_job_failed(
-                    dependent_job_name, failure_type="SkippedDueToUpstreamFailure"
-                )
+        direct_dependents = [
+            other_job_name
+            for other_job_name, other_job in self.state["jobs"].items()
+            if job_name in other_job.get("dependencies", [])
+        ]
+        for dependent_job_name in direct_dependents:
+            self.mark_job_failed(
+                dependent_job_name, failure_type="SkippedDueToUpstreamFailure"
+            )
 
         if failure_type == "Failed":
             # only need to do this once after all recursive updates
