@@ -5,8 +5,12 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 class KTTask(BaseModel):
     """
-    A single function call to be executed as part of a static job.
+    Represents a single function call to be executed as part of a static job.
     This will run as a single Kubernetes Pod.
+
+    Attributes:
+        function (Optional[str]): The name of the function to call from within kt_functions.
+        args (Optional[Dict]): Keyword arguments to pass to the function.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -23,6 +27,20 @@ class KTTask(BaseModel):
 
 
 class KTJob(BaseModel):
+    """
+    Represents a job in the pipeline, which can be static or dynamic.
+
+    Attributes:
+        type (Literal["static", "dynamic"]): The type of job.
+        name (Optional[str]): Unique job name.
+        memory (Optional[str]): Memory request/limit.
+        cpu (Optional[str]): CPU request/limit.
+        dependencies (Optional[List[str]]): List of job names this job depends on.
+        function (Optional[str]): The name of the function to call for dynamic jobs.
+        args (Optional[Dict]): Keyword arguments to pass to the function.
+        tasks (Optional[List[KTTask]]): List of tasks to run in this job (for static jobs).
+    """
+
     model_config = ConfigDict(extra="forbid")
     type: Literal["static", "dynamic"] = Field(
         ...,
@@ -69,6 +87,14 @@ class KTJob(BaseModel):
 
     @model_validator(mode="after")
     def validate_type_specific_fields(self) -> "KTJob":
+        """Validates that only the correct fields are set for static or dynamic jobs.
+
+        Returns:
+            KTJob: The validated KTJob instance.
+
+        Raises:
+            ValueError: If invalid fields are set for the job type.
+        """
         if self.type == "static":
             if self.function or self.args:
                 raise ValueError("Static jobs must not define 'function' or 'args'")
@@ -80,7 +106,11 @@ class KTJob(BaseModel):
 
 class KTPipeline(BaseModel):
     """
-    A pipeline consisting of jobs and their dependencies.
+    Represents a pipeline consisting of jobs and their dependencies.
+
+    Attributes:
+        name (str): The pipeline name.
+        jobs (Optional[List[KTJob]]): List of jobs to run.
     """
 
     model_config = ConfigDict(extra="forbid")

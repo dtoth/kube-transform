@@ -3,105 +3,83 @@ import time
 import os
 import uuid
 import re
+from typing import Any, Dict
 from kubernetes import client, watch
 import kube_transform.fsutil as fs
 import logging
 from kube_transform.controller.k8s import create_static_job, create_dynamic_job
-from kube_transform.spec import KTPipeline, KTJob
-
-JOB_STATES = [
-    "Running",
-    "Pending",
-    "AwaitingDescendants",
-    "SkippedDueToUpstreamFailure",
-    "DescendantFailed",
-    "Completed",
-    "Failed",
-]
+from kube_transform.kube_transform.controller.pipeline_manager import PipelineManager
 
 
 class KTController:
+    """
+    Manages a single pipeline run from start through completion or failure
+    and then exits.
 
-    ### Initialization ###
-    def __init__(self, pipeline_run_id, namespace="default"):
+    KTController handles direct interactions with Kubernetes, and delegates
+    scheduling logic to a PipelineManager.
+    """
+
+    def __init__(self, pipeline_run_id: str, namespace: str = "default") -> None:
+        """
+        Initializes the KTController.
+
+        Args:
+            pipeline_run_id (str): Unique identifier for the pipeline run.
+            namespace (str): Kubernetes namespace to operate in. Defaults to "default".
+        """
         self.namespace = namespace
         self.pipeline_run_id = pipeline_run_id
         self.pipeline_spec_path = "/config/pipeline_spec.json"
         self.pipeline_state_path = (
             f"kt-metadata/{pipeline_run_id}/pipeline_run_state.json"
         )
-        self.batch_v1 = client.BatchV1Api()
-        self.pipeline = self.validate_pipeline(self.load_pipeline_spec())
-        self.state = self.initialize_pipeline_state()
         self.image = os.getenv("KT_IMAGE_PATH")
+        self.batch_v1 = client.BatchV1Api()
 
-    def load_pipeline_spec(self):
+        pipeline_spec = self.load_pipeline_spec()
+        self.pipeline_manager = PipelineManager(pipeline_spec, pipeline_run_id)
+
+    def load_pipeline_spec(self) -> Dict[str, Any]:
+        """
+        Loads the pipeline specification from a JSON file.
+
+        Returns:
+            Dict[str, Any]: The pipeline specification.
+        """
         with open(self.pipeline_spec_path, "r") as f:
             return json.load(f)
 
-    def initialize_pipeline_state(self):
-        state = {"pipeline_run_id": self.pipeline_run_id, "jobs": {}}
-        for job in self.pipeline["jobs"]:
-            job_name = job["name"]
-            state["jobs"][job_name] = job
-            job["status"] = "Pending"
-        self.save_pipeline_state(state)
-        return state
-
-    def sanitize_k8s_job_name(self, s: str) -> str:
-        s = s.lower()
-        s = s.replace("_", "-")
-        s = re.sub(r"[^a-z0-9\-]", "", s)
-        return s[:63]
-
-    def validate_job_list(self, job_list, base_name):
-        jobs = []
-        for idx, job in enumerate(job_list):
-            job_obj = KTJob(**job)
-            job = job_obj.model_dump()
-            if not job.get("name"):
-                job["name"] = f"{base_name}-job-{idx}"
-            job["name"] = self.sanitize_k8s_job_name(job["name"])
-            jobs.append(job)
-        return jobs
-
-    def validate_pipeline(self, pipeline):
-        pipeline_obj = KTPipeline(**pipeline)
-        pipeline = pipeline_obj.model_dump()
-        jobs = self.validate_job_list(pipeline["jobs"], f"pipeline-{pipeline['name']}")
-        pipeline["jobs"] = jobs
-        return pipeline
-
-    ### State Management ###
-    def save_pipeline_state(self, state):
+    def save_pipeline_state(self) -> None:
+        """
+        Saves the current state of the pipeline to a JSON file.
+        """
+        state = self.pipeline_manager.get_state()
         fs.write(self.pipeline_state_path, json.dumps(state, indent=2))
 
-    ### Job Management ###
-    def job_can_run(self, job):
-        return job["status"] == "Pending" and all(
-            self.state["jobs"][dep]["status"] == "Completed"
-            for dep in job["dependencies"]
-        )
+    def submit_ready_jobs(self) -> None:
+        """
+        Submits all jobs that are ready to run.
+        """
+        ready_jobs = self.pipeline_manager.get_ready_jobs()
+        for job_name, job_spec in ready_jobs.items():
+            self.submit_job(job_name, job_spec)
+            self.pipeline_manager.mark_job_running(job_name)
+        self.save_pipeline_state()
 
-    def submit_ready_jobs(self):
-        """Submit all jobs that are ready to run."""
-        for job_name, job in self.state["jobs"].items():
-            if self.job_can_run(job):
-                self.submit_job(job_name)
+    def submit_job(self, job_name: str, job_spec: Dict[str, Any]) -> None:
+        """
+        Submits a job to the Kubernetes cluster.
 
-    def submit_job(self, job_name):
-        """Submit a job to the Kubernetes cluster."""
+        Args:
+            job_name (str): The name of the job.
+            job_spec (Dict[str, Any]): The specification of the job.
+        """
         logging.info(f"Submitting job {job_name}...")
-        job_spec = self.state["jobs"][job_name]
-
-        if not job_spec:
-            raise ValueError(f"Job {job_name} not found in pipeline spec!")
 
         if not job_spec["tasks"] and not job_spec["function"]:
             logging.info(f"Job {job_name} is a no-op.")
-            job_spec["status"] = "Completed"
-            self.handle_job_completion(job_name, True)
-
+            self.pipeline_manager.mark_job_completed(job_name)
         else:
             if job_spec["type"] == "static":
                 create_static_job(
@@ -119,127 +97,18 @@ class KTController:
                     self.image,
                     self.namespace,
                 )
+        self.pipeline_manager.mark_job_running(job_name)
 
-            job_spec["status"] = "Running"
-
-        self.save_pipeline_state(self.state)
-
-    def update_job_states(self):
-        """Update job states based on dependencies and descendants."""
-        changed = True
-        while changed:
-            changed = False
-            for job_name, job in self.state["jobs"].items():
-                if job["status"] not in ["Pending", "AwaitingDescendants"]:
-                    continue
-
-                # If any dependencies are marked as Failed or SkippedDueToUpstreamFailure or DescendantFailed,
-                # mark as SkippedDueToUpstreamFailure
-                if any(
-                    self.state["jobs"][dep]["status"]
-                    in ["Failed", "SkippedDueToUpstreamFailure", "DescendantFailed"]
-                    for dep in job["dependencies"]
-                ):
-                    job["status"] = "SkippedDueToUpstreamFailure"
-                    changed = True
-                # If any descendants are marked as Failed or SkippedDueToUpstreamFailure or DescendantFailed,
-                # mark as DescendantFailed
-                elif any(
-                    self.state["jobs"][desc]["status"]
-                    in ["Failed", "SkippedDueToUpstreamFailure", "DescendantFailed"]
-                    for desc in job.get("direct_descendants", [])
-                ):
-                    job["status"] = "DescendantFailed"
-                    changed = True
-                # If AwaitingDescendants and all descendants are Completed,
-                # mark as Completed
-                elif job["status"] == "AwaitingDescendants" and all(
-                    self.state["jobs"][desc]["status"] == "Completed"
-                    for desc in job.get("direct_descendants", [])
-                ):
-                    job["status"] = "Completed"
-                    changed = True
-
-    def handle_job_completion(self, job_name, success):
-        """Handle job completion or failure by updating state and spawning descendant jobs."""
-
-        logging.info(f"Job {job_name} {'succeeded' if success else 'failed'}")
-
-        job_info = self.state["jobs"][job_name]
-
-        # Set target job to completed or failed or AwaitingDescendants (and register the descendants as pending)
-        if not success:
-            job_info["status"] = "Failed"
-
-        if success:
-            if job_info["type"] == "static":
-                job_info["status"] = "Completed"
-            elif job_info["type"] == "dynamic":
-                # Spawn descendant jobs
-                job_info["status"] = "AwaitingDescendants"
-                orch_spec_path = f"kt-metadata/{self.pipeline_run_id}/dynamic_job_output/{job_name}.json"
-                if fs.exists(orch_spec_path):
-                    orch_spec = json.loads(fs.read(orch_spec_path))
-                    new_job_list = self.validate_job_list(orch_spec, job_name)
-                    direct_descendants = []
-                    for jidx, new_job in enumerate(new_job_list):
-                        new_job_name = new_job["name"]
-                        self.state["jobs"][new_job_name] = new_job
-                        new_job["status"] = "Pending"
-                        new_job["parent_job"] = job_name
-                        direct_descendants.append(new_job_name)
-                    job_info["direct_descendants"] = direct_descendants
-                else:
-                    logging.warning(
-                        f"Orchestration spec not found at {orch_spec_path}. No jobs spawned."
-                    )
-
-        # Update state for all jobs, submit ready jobs, and save state
-        self.update_job_states()
-        self.submit_ready_jobs()
-        self.save_pipeline_state(self.state)
-
-        if job_info["type"] == "dynamic":
-            orch_spec_path = (
-                f"kt-metadata/{self.pipeline_run_id}/orchestration/{job_name}.json"
-            )
-            if fs.exists(orch_spec_path):
-                orch_spec = json.loads(fs.read(orch_spec_path))
-                self.pipeline["jobs"].extend(orch_spec["jobs"])
-                spawned_jobs = []
-
-                for new_job in orch_spec["jobs"]:
-                    new_job_name = new_job["name"]
-                    new_job_type = new_job.get("type")
-                    if new_job_type not in ["dynamic", "static"]:
-                        raise ValueError(
-                            f"Job '{new_job_name}' must specify type as either 'dynamic' or 'static'."
-                        )
-
-                    self.state["jobs"][new_job_name] = {
-                        "status": "Pending",
-                        "dependencies": new_job.get("dependencies", []),
-                        "type": new_job_type,
-                        "parent_job": job_name,
-                    }
-                    spawned_jobs.append(new_job_name)
-
-                self.state["jobs"][job_name][
-                    "status"
-                ] = "Awaiting-Descendant-Completion"
-                self.state["jobs"][job_name]["spawned_jobs"] = spawned_jobs
-                self.save_pipeline_state(self.state)
-
-        self.submit_ready_jobs()
-
-    def monitor_jobs(self):
+    def monitor_jobs(self) -> None:
+        """
+        Monitors the status of jobs in the Kubernetes cluster and updates the pipeline state.
+        """
         # Submit initial jobs
         self.submit_ready_jobs()
 
         # Watch for job completions
         watcher = watch.Watch()
-        done = False
-        while True:
+        while not self.pipeline_manager.is_done():
             for event in watcher.stream(
                 self.batch_v1.list_namespaced_job, namespace=self.namespace
             ):
@@ -252,36 +121,33 @@ class KTController:
                 job_name = job_name.replace(f"-{self.pipeline_run_id}", "")
                 job_status = job.status.conditions
 
-                if job_name not in self.state["jobs"] or self.state["jobs"][job_name][
-                    "status"
-                ] not in [
-                    "Running",
-                    "Pending",
-                ]:
-                    continue
-
                 if job_status:
                     for condition in job_status:
                         if condition.status != "True":
                             continue
-                        if condition.type in ["Complete", "Failed"]:
-                            self.handle_job_completion(
-                                job_name, condition.type == "Complete"
-                            )
-
-                if (
-                    sum(
-                        job["status"] in ["Running", "Pending", "AwaitingDescendants"]
-                        for job in self.state["jobs"].values()
-                    )
-                    == 0
-                ):
-                    logging.info("All jobs completed. Exiting monitoring.")
-                    done = True
-                    break
-            if done:
-                break
+                        if condition.type == "Complete":
+                            self.register_dynamically_spawned_jobs(job_name)
+                            self.pipeline_manager.mark_job_completed(job_name)
+                            self.submit_ready_jobs()
+                        elif condition.type == "Failed":
+                            self.pipeline_manager.mark_job_failed(job_name)
+                            self.save_pipeline_state()
             time.sleep(5)
+        logging.info("All jobs completed. Exiting monitoring.")
+
+    def register_dynamically_spawned_jobs(self, job_name: str) -> None:
+        """
+        Registers dynamically spawned jobs (if any) in the pipeline manager.
+
+        Args:
+            job_name (str): The name of the completed job that may have spawned new jobs.
+        """
+        orch_spec_path = (
+            f"kt-metadata/{self.pipeline_run_id}/dynamic_job_output/{job_name}.json"
+        )
+        if fs.exists(orch_spec_path):
+            new_job_list = json.loads(fs.read(orch_spec_path))
+            self.pipeline_manager.register_job_list(new_job_list, parent_job=job_name)
 
 
 if __name__ == "__main__":
