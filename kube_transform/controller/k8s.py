@@ -2,16 +2,27 @@ from kubernetes import client
 import json
 import os
 import logging
+from typing import Any, Dict
 
 import kube_transform.fsutil as fs
 
 
 def create_controller_job(
-    pipeline_run_id, pipeline_spec, image_path, data_dir, namespace
-):
+    pipeline_run_id: str,
+    pipeline_spec: Dict[str, Any],
+    image_path: str,
+    data_dir: str,
+    namespace: str,
+) -> None:
     """
     Creates a Kubernetes Job to run the KTController.
-    This code is run on the deployment device.
+
+    Args:
+        pipeline_run_id (str): The unique ID for the pipeline run.
+        pipeline_spec (Dict[str, Any]): The pipeline specification.
+        image_path (str): The path to the container image for all worker pods.
+        data_dir (str): The directory for data storage (can be S3, local, etc.).
+        namespace (str): The Kubernetes namespace to create the job in.
     """
     job_name = f"kt-controller"
 
@@ -39,9 +50,22 @@ def create_controller_job(
     )
 
 
-def create_static_job(job_name, pipeline_run_id, job_spec, image_path, namespace):
-    """Creates a Kubernetes Job to run a static job."
-    This code is run on the controller pod."
+def create_static_job(
+    job_name: str,
+    pipeline_run_id: str,
+    job_spec: Dict[str, Any],
+    image_path: str,
+    namespace: str,
+) -> None:
+    """
+    Creates a Kubernetes Job to run a static job.
+
+    Args:
+        job_name (str): The name of the job.
+        pipeline_run_id (str): The unique ID for the pipeline run.
+        job_spec (Dict[str, Any]): The job specification.
+        image_path (str): The path to the container image.
+        namespace (str): The Kubernetes namespace to create the job in.
     """
 
     # Write job config for task index lookup
@@ -90,9 +114,22 @@ def create_static_job(job_name, pipeline_run_id, job_spec, image_path, namespace
     )
 
 
-def create_dynamic_job(job_name, pipeline_run_id, job_spec, image_path, namespace):
-    """Creates a Kubernetes Job to run a dynamic job."
-    This code is run on the controller pod."
+def create_dynamic_job(
+    job_name: str,
+    pipeline_run_id: str,
+    job_spec: Dict[str, Any],
+    image_path: str,
+    namespace: str,
+) -> None:
+    """
+    Creates a Kubernetes Job to run a dynamic job.
+
+    Args:
+        job_name (str): The name of the job.
+        pipeline_run_id (str): The unique ID for the pipeline run.
+        job_spec (Dict[str, Any]): The job specification.
+        image_path (str): The path to the container image.
+        namespace (str): The Kubernetes namespace to create the job in.
     """
 
     memory = job_spec.get("memory", "1Gi")
@@ -136,19 +173,36 @@ def create_dynamic_job(job_name, pipeline_run_id, job_spec, image_path, namespac
 
 
 def create_k8s_job(
-    job_name,
-    image_path,
-    namespace,
-    config_map_name,
-    data_dir,
-    pipeline_run_id,
-    job_args,
-    service_account,
-    command,
-    memory,
-    cpu,
-    task_count=1,
-):
+    job_name: str,
+    image_path: str,
+    namespace: str,
+    config_map_name: str,
+    data_dir: str,
+    pipeline_run_id: str,
+    job_args: Dict[str, Any],
+    service_account: str,
+    command: list,
+    memory: str,
+    cpu: str,
+    task_count: int = 1,
+) -> None:
+    """
+    Creates a generic Kubernetes Job.
+
+    Args:
+        job_name (str): The name of the job.
+        image_path (str): The path to the container image.
+        namespace (str): The Kubernetes namespace to create the job in.
+        config_map_name (str): The name of the ConfigMap (if any).
+        data_dir (str): The directory for data storage.
+        pipeline_run_id (str): The unique ID for the pipeline run.
+        job_args (Dict[str, Any]): Arguments for the job.
+        service_account (str): The service account to use.
+        command (list): The command to execute in the container.
+        memory (str): Memory request for the container.
+        cpu (str): CPU request for the container.
+        task_count (int, optional): Number of tasks to run. Defaults to 1.
+    """
     image_pull_policy = "Always" if "/" in image_path else "Never"
 
     volumes = [
@@ -236,9 +290,16 @@ def create_k8s_job(
     batch_v1.create_namespaced_job(namespace=namespace, body=job)
 
 
-def _multiply_memory_str(mem_str, factor):
+def _multiply_memory_str(mem_str: str, factor: float) -> str:
     """
-    Multiply a memory string by a factor and return the new string.
+    Multiplies a memory string by a factor and returns the new string.
+
+    Args:
+        mem_str (str): The memory string (e.g., "1Gi").
+        factor (float): The multiplication factor.
+
+    Returns:
+        str: The updated memory string.
     """
     number = int("".join([c for c in mem_str if c.isnumeric()]))
     unit = "".join([c for c in mem_str if not c.isnumeric()])

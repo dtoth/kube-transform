@@ -3,6 +3,7 @@ import time
 import os
 import uuid
 import re
+from typing import Any, Dict
 from kubernetes import client, watch
 import kube_transform.fsutil as fs
 import logging
@@ -19,8 +20,14 @@ class KTController:
     scheduling logic to a PipelineManager.
     """
 
-    ### Initialization ###
-    def __init__(self, pipeline_run_id, namespace="default"):
+    def __init__(self, pipeline_run_id: str, namespace: str = "default") -> None:
+        """
+        Initializes the KTController.
+
+        Args:
+            pipeline_run_id (str): Unique identifier for the pipeline run.
+            namespace (str): Kubernetes namespace to operate in. Defaults to "default".
+        """
         self.namespace = namespace
         self.pipeline_run_id = pipeline_run_id
         self.pipeline_spec_path = "/config/pipeline_spec.json"
@@ -33,26 +40,41 @@ class KTController:
         pipeline_spec = self.load_pipeline_spec()
         self.pipeline_manager = PipelineManager(pipeline_spec, pipeline_run_id)
 
-    def load_pipeline_spec(self):
+    def load_pipeline_spec(self) -> Dict[str, Any]:
+        """
+        Loads the pipeline specification from a JSON file.
+
+        Returns:
+            Dict[str, Any]: The pipeline specification.
+        """
         with open(self.pipeline_spec_path, "r") as f:
             return json.load(f)
 
-    ### State Management ###
-    def save_pipeline_state(self):
+    def save_pipeline_state(self) -> None:
+        """
+        Saves the current state of the pipeline to a JSON file.
+        """
         state = self.pipeline_manager.get_state()
         fs.write(self.pipeline_state_path, json.dumps(state, indent=2))
 
-    ### Job Management ###
-    def submit_ready_jobs(self):
-        """Submit all jobs that are ready to run."""
+    def submit_ready_jobs(self) -> None:
+        """
+        Submits all jobs that are ready to run.
+        """
         ready_jobs = self.pipeline_manager.get_ready_jobs()
         for job_name, job_spec in ready_jobs.items():
             self.submit_job(job_name, job_spec)
             self.pipeline_manager.mark_job_running(job_name)
         self.save_pipeline_state()
 
-    def submit_job(self, job_name, job_spec):
-        """Submit a job to the Kubernetes cluster."""
+    def submit_job(self, job_name: str, job_spec: Dict[str, Any]) -> None:
+        """
+        Submits a job to the Kubernetes cluster.
+
+        Args:
+            job_name (str): The name of the job.
+            job_spec (Dict[str, Any]): The specification of the job.
+        """
         logging.info(f"Submitting job {job_name}...")
 
         if not job_spec["tasks"] and not job_spec["function"]:
@@ -77,7 +99,10 @@ class KTController:
                 )
         self.pipeline_manager.mark_job_running(job_name)
 
-    def monitor_jobs(self):
+    def monitor_jobs(self) -> None:
+        """
+        Monitors the status of jobs in the Kubernetes cluster and updates the pipeline state.
+        """
         # Submit initial jobs
         self.submit_ready_jobs()
 
@@ -110,8 +135,13 @@ class KTController:
             time.sleep(5)
         logging.info("All jobs completed. Exiting monitoring.")
 
-    def register_dynamically_spawned_jobs(self, job_name):
-        """Register dynamically spawned jobs (if any) in the pipeline manager."""
+    def register_dynamically_spawned_jobs(self, job_name: str) -> None:
+        """
+        Registers dynamically spawned jobs (if any) in the pipeline manager.
+
+        Args:
+            job_name (str): The name of the completed job that may have spawned new jobs.
+        """
         orch_spec_path = (
             f"kt-metadata/{self.pipeline_run_id}/dynamic_job_output/{job_name}.json"
         )
