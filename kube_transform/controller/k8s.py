@@ -9,7 +9,8 @@ import kube_transform.fsutil as fs
 def create_controller_job(
     pipeline_run_id, pipeline_spec, image_path, data_dir, namespace
 ):
-    """Creates a Kubernetes Job to run the KTController.
+    """
+    Creates a Kubernetes Job to run the KTController.
     This code is run on the deployment device.
     """
     job_name = f"kt-controller"
