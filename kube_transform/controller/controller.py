@@ -8,7 +8,7 @@ from kubernetes import client, watch
 import kube_transform.fsutil as fs
 import logging
 from kube_transform.controller.k8s import create_static_job, create_dynamic_job
-from kube_transform.kube_transform.controller.pipeline_manager import PipelineManager
+from kube_transform.controller.pipeline_manager import PipelineManager
 
 
 class KTController:
